@@ -1,2 +1,2 @@
-rigdio_version = "v1.162"
+rigdio_version = "v1.163"
 rigdj_version = "v1.11"
