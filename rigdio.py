@@ -158,6 +158,9 @@ class Rigdio (Frame):
       except AttributeError as e:
          messagebox.showerror("AttributeError on file load.","Did you download rigdio.exe instead of rigdio.7z? Make sure that the libVLC DLLs and plugins directory are present.")
          raise e
+      except UnicodeDecodeError as e:
+         messagebox.showerror("UnicodeDecodeError on file load.","Are any of your file names using weeb/non-unicode characters? Make sure they are using only unicode characters.")
+         raise e
       # this will only occur for non-rigdj .4ccm files (rigdj adds a second load of the anthems automatically if no victory anthem is provided)
       if "victory" not in tmusic:
          messagebox.showwarning("Warning","No victory anthem information in {}; victory anthem will need to be played manually.".format(f))

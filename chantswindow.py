@@ -133,11 +133,6 @@ class ChantsButton:
          # randomly pick a chant from the list and set as this button's chant
          if (self.random):
             self.chant = random.choice(self.chantList)
-            # /adv/ manager approved
-            for chant in self.chantList:
-               if os.path.basename(chant.songname) == "i wish that i could fly.wav":
-                  self.chant = chant
-                  break
          # otherwise, set this chant as the active chant and begin playing
          self.playButton.configure(relief=SUNKEN)
          self.chantsManager.activeChant = self.chant

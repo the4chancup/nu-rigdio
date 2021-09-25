@@ -116,7 +116,8 @@ def loadsong(filename):
    filename = abspath(filename)
    if not ( isfile(filename) ):  
       raise Exception(filename+" not found.")
-   source = vlc.MediaPlayer("file:///"+filename)
+   # no-video to prevent any video tracks from playing
+   source = vlc.MediaPlayer("file:///"+filename, ":no-video")
    return source
 
 class ConditionPlayer (ConditionList):
