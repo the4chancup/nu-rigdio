@@ -11,7 +11,6 @@ class ConditionList:
       self.instructions = []
       self.disabled = False
       self.startTime = 0
-      self.playbackSpeed = 1.00
       self.event = None
       self.endType = "loop"
       self.pauseType = "continue"
@@ -127,11 +126,11 @@ class ConditionPlayer (ConditionList):
       self.type = type
       self.isGoalhorn = type=="goalhorn"
       self.fade = None
-      self.endChecker = None
       self.startTime = 0
-      self.playbackSpeed = 1.00
+      self.customSpeed = False
       self.firstPlay = True
       self.randomise = False
+      self.warcry = False
       self.pauseType = "continue"
       self.instructionsStart = []
       self.instructionsPause = []
@@ -140,10 +139,17 @@ class ConditionPlayer (ConditionList):
       # repetition settings; may be changed by instructions
       norepeat = set(["victory","chant"])
       self.repeat = (pname not in norepeat)
+      # append and prepare the instructions to this object
+      self.appendInstructions()
       self.instruct()
       # hard override for events to stop them repeating
       if self.repeat and self.event is None:
          self.song.get_media().add_options("input-repeat=-1")
+
+   def appendInstructions (self):
+      for instruction in self.instructions:
+         print("Appending {} instruction".format(instruction))
+         instruction.append(self)
    
    def instruct (self):
       for instruction in self.instructions:
@@ -167,8 +173,6 @@ class ConditionPlayer (ConditionList):
          for instruction in self.instructionsStart:
             instruction.run(self)
          self.firstPlay = False
-      if len(self.instructionsEnd) > 0:
-         self.endChecker = threading.Thread(target=self.checkEnd)
 
    def adjustVolume (self, value):
       self.maxVolume = int(value)
@@ -189,13 +193,6 @@ class ConditionPlayer (ConditionList):
    def onEnd (self, callback):
       events = self.song.event_manager()
       events.event_attach(vlc.EventType.MediaPlayerEndReached, callback)
-
-   def checkEnd (self):
-      while self.endChecker is not None:
-         if self.song.get_media().get_state() == vlc.State.Ended:
-            for instruction in self.instructionsEnd:
-               instruction.run(self)
-            self.endChecker = None
 
    def fadeOut (self):
       i = 100
@@ -227,8 +224,10 @@ class PlayerManager:
       # derived information
       self.song = None
       self.lastSong = None
+      self.endChecker = None
       self.pname = clists[0].pname
       self.futureVolume = None
+      self.warcry = True
 
    def __iter__ (self):
       for x in self.clists:
@@ -239,7 +238,11 @@ class PlayerManager:
          self.song.adjustVolume(value)
       self.futureVolume = value
 
-   def getSong (self):
+   def getSong (self, song = None):
+      if song is not None:
+         for clist in self.clists:
+            if song == clist:
+               return clist
       # iterate over songs with while loop
       i = 0
       while i < len(self.clists):
@@ -255,35 +258,50 @@ class PlayerManager:
             # do not increment i, self.clists[i] is now the next song; continue
             continue
          # if randomise is true, check if all other songs have randomise true as well
-         if self.clists[i].randomise:
+         # do not count warcry songs
+         if self.clists[i].randomise and not self.clists[i].warcry:
             f, randomSong = 0, True
             while f < len(self.clists):
-               # if one of them is false, do not play a random song
-               if not self.clists[f].randomise and self.clists[i].pname == self.clists[f].pname:
+               # if one of them is false and they're not a warcry, do not play a random song
+               if not self.clists[f].randomise and not self.clists[f].warcry and self.clists[i].pname == self.clists[f].pname:
                   randomSong = False
                   break
                f += 1
             if randomSong:
+               # copy the entire song list of that team
                x, randomList = 0, self.clists.copy()
                while x < len(randomList):
-                  if (self.clists[i].pname != randomList[x].pname):
+                  # traverse through and remove all songs that are not associated with the player clicked
+                  # remove all warcry songs from the list as well
+                  if self.clists[i].pname != randomList[x].pname or randomList[x].warcry:
                      randomList.pop(x)
                   else:
                      x += 1
+               # reset the warcry variable so that warcry will play again when button is pressed
+               self.warcry = True
+               # return a randomly chosen song from the modified copied list
                return random.choice(randomList)
          # if conditions were met
          if checked:
-            return self.clists[i]
+            # if warcry is enabled, play the first song found, warcry included
+            if self.warcry:
+               return self.clists[i]
+            # if a warcry has been played, play the first non-warcry song found
+            else:
+               if not self.clists[i].warcry:
+                  # reset the warcry variable so that warcry will play again when button is pressed
+                  self.warcry = True
+                  return self.clists[i]
          # if the song didn't succeed, move to the next
          i += 1
       # if no song was found, return nothing
       return None
 
-   def playSong (self):
+   def playSong (self, song = None):
       # don't play multiple songs at once
       self.pauseSong()
       # get the song to play
-      self.song = self.getSong()
+      self.song = self.getSong(song)
       # if volume was stored, update it
       if self.futureVolume is not None:
          self.song.adjustVolume(self.futureVolume)
@@ -296,12 +314,18 @@ class PlayerManager:
       self.firstTime = self.song.firstPlay
       # play the song
       self.song.play()
+      # start the end checker instruction thread
+      if len(self.song.instructionsEnd) > 0:
+         self.endChecker = threading.Thread(target=self.checkEnd)
+         self.endChecker.start()
       # remove any data specific to this goal
       self.game.clearButtonFlags()
       return self.firstTime
 
    def pauseSong (self):
       if self.song is not None:
+         # clear end checker thread to prevent continuous running while paused
+         self.endChecker = None
          # log pause
          print("Pausing",self.song.songname)
          # pause the song
@@ -309,6 +333,13 @@ class PlayerManager:
          # clear self.song
          self.lastSong = self.song
          self.song = None
+
+   def checkEnd (self):
+      while self.endChecker is not None:
+         if self.song.song.get_media().get_state() == vlc.State.Ended:
+            for instruction in self.song.instructionsEnd:
+               instruction.run(self)
+            self.endChecker = None
 
    # if the song is currently playing or has been played, reset it
    def resetLastPlayed (self):

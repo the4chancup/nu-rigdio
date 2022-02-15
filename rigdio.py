@@ -67,6 +67,8 @@ class Rigdio (Frame):
       # other stuff for the middle column, like playback speed slider and chants
       self.middleStuff = Frame(self)
       self.initMiddleStuff().grid(row=2,column=1)
+      # used for the chaoshorn
+      self.nuke = False
       # events
       self.events = EventController()
       # undo (temporary)
@@ -88,6 +90,13 @@ class Rigdio (Frame):
       self.game.gametype = option.lower()
 
    def initMiddleStuff (self):
+      # chaos horn
+      Label(self.middleStuff, text=None).grid(columnspan=2)
+      self.chaosHorn = Button(self.middleStuff, text="Chaoshorn", command=self.goNuclear, bg="#ee4b2b")
+      self.chaosHorn.grid(columnspan=2)
+      self.killChaos = Button(self.middleStuff, text="Kill Chaoshorn", command=self.cutTheBomb, bg="#2bb4ee")
+      self.killChaos.grid(columnspan=2)
+      Label(self.middleStuff, text=None).grid(columnspan=2)
       # universal playback speed slider
       Label(self.middleStuff, text="Playback Speed").grid(columnspan=2)
       self.playbackSpeedMenu = Scale(self.middleStuff, from_=0.25, to=4.00, orient=HORIZONTAL, command=NONE, resolution=0.25, showvalue=1, digits=3)
@@ -106,10 +115,30 @@ class Rigdio (Frame):
       self.stopEarlyButton.grid(columnspan=2)
       # random chant buttons accessible from the main window
       self.randomHome = cWin.ChantsButton(self.middleStuff, self.chantsManager, None, "Random", True, True)
-      self.randomHome.playButton.grid(row=6, column=0)
+      self.randomHome.playButton.grid(row=10, column=0)
       self.randomAway = cWin.ChantsButton(self.middleStuff, self.chantsManager, None, "Random", False, True)
-      self.randomAway.playButton.grid(row=6, column=1)
+      self.randomAway.playButton.grid(row=10, column=1)
       return self.middleStuff
+
+   def goNuclear(self):
+      confirm = messagebox.askyesnocancel("Are you sure you want to do this?",
+      """Chaoshorn will play all the player buttons (including the Anthem and VA) that are currently loaded at the same time. Do you still want to go the nuclear option?""", icon='warning')
+      if not confirm or self.nuke:
+         return
+      else:
+         if self.home is not None:
+            self.home.goNuclear()
+         if self.away is not None:
+            self.away.goNuclear()
+         self.nuke = True
+
+   def cutTheBomb(self):
+      if self.nuke:
+         if self.home is not None:
+            self.home.stopNuclear()
+         if self.away is not None:
+            self.away.stopNuclear()
+         self.nuke = False
 
    # used to disable the use of the playback speed slider when a song is playing, to make it obvious what the current playback speed is
    def disablePlaybackSpeedSlider (self, disable):
@@ -121,11 +150,11 @@ class Rigdio (Frame):
       if home:
          self.randomHome.playButton.destroy()
          self.randomHome = cWin.ChantsButton(self.middleStuff, self.chantsManager, chantsList, "Random", True, True)
-         self.randomHome.playButton.grid(row=6, column=0)
+         self.randomHome.playButton.grid(row=10, column=0)
       else:
          self.randomAway.playButton.destroy()
          self.randomAway = cWin.ChantsButton(self.middleStuff, self.chantsManager, chantsList, "Random", False, True)
-         self.randomAway.playButton.grid(row=6, column=1)
+         self.randomAway.playButton.grid(row=10, column=1)
 
    # open and close the chants window
    def chant_window (self):
@@ -148,6 +177,7 @@ class Rigdio (Frame):
          self.chantsManager.window = None
 
    def mainClose (self, master):
+      self.cutTheBomb()
       self.chantsManager.endThread()
       master.destroy()
 
@@ -173,7 +203,7 @@ class Rigdio (Frame):
             self.home.clear()
          self.home = TeamMenuLegacy(self, tname, tmusic, True, self.game)
          if self.away is not None:
-            self.home.anthemButtons.awayButtonHook = self.away.anthemButtons
+            self.home.anthemButton.awayButtonHook = self.away.anthemButton
          self.home.grid(row = 1, column = 0, rowspan=2, sticky=N)
          if self.chantsManager is not None:
             if "chant" in tmusic and tmusic["chant"] is not None:
@@ -194,7 +224,7 @@ class Rigdio (Frame):
             self.away.clear()
          self.away = TeamMenuLegacy(self, tname, tmusic, False, self.game)
          if self.home is not None:
-            self.home.anthemButtons.awayButtonHook = self.away.anthemButtons
+            self.away.anthemButton.awayButtonHook = self.home.anthemButton
          self.away.grid(row = 1, column = 2, rowspan=2, sticky=N)
          if self.chantsManager is not None:
             if "chant" in tmusic and tmusic["chant"] is not None:

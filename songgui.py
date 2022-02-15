@@ -1,11 +1,11 @@
 from tkinter import *
+import os.path
 import tkinter.messagebox as messagebox
 from rigparse import reserved
 from rigdio_except import UnloadSong, SongNotFound
 from legacy import PlayerManager
 from config import settings
-
-from time import sleep, time
+from time import sleep
 
 class PlayerButtons:
    def __init__ (self, frame, clists, home, game, text = None):
@@ -18,8 +18,11 @@ class PlayerButtons:
       # text and buttons
       self.text = text
       self.frame = frame
-      # timer stuff
+      # used for anthem handling
+      # determine if this is an anthem/VA button
+      self.anthem = (self.pname == "anthem")
       self.victoryAnthem = (self.pname == "victory")
+      # timer stuff
       if self.victoryAnthem:
          # vlc takes some time to retrieve song duration, so a sleep delay is needed
          self.sleepDelay = 1
@@ -31,17 +34,27 @@ class PlayerButtons:
          self.reserved = False
       else:
          self.reserved = True
-      # used for anthem handling
-      ## determine if this is an anthem button
-      self.anthem = self.text == "Anthem"
       ## Home anthem button is hooked to this by the main client, to stop it when it starts
       self.awayButtonHook = None
+      self.showVolume = True
       # text was specified, so this is a button for a reserved keyword
-      self.listButton = Button(self.frame, text="?", command=self.showSongs, bg=settings.colours["home" if home else "away"])
+      self.volumeButton = Button(self.frame, text="🔊", command=self.showHideVolume, bg=settings.colours["home" if home else "away"])
       self.playButton = Button(self.frame, text=self.text, command=self.playSong, bg=settings.colours["home" if home else "away"])
       self.resetButton = Button(self.frame, text="⟲", command=self.resetSong, bg=settings.colours["home" if home else "away"])
       self.volume = Scale(self.frame, from_=0, to=100, orient=HORIZONTAL, command=self.clists.adjustVolume, showvalue=0)
       self.volume.set(80)
+
+      self.dropdownButton = None
+      if self.victoryAnthem:
+         self.specialVAs = self.VAOnly(clists, home)
+
+   def showHideVolume (self):
+      if self.showVolume:
+         self.volume.grid_remove()
+         self.showVolume = False
+      else:
+         self.volume.grid()
+         self.showVolume = True
 
    def resetSong (self):
       self.clists.resetLastPlayed()
@@ -64,9 +77,8 @@ class PlayerButtons:
             # if this is the first time this song is being played and it has a custom playback speed set, set the slider to that speed
             # the playback speed will still use the exact value specified in the .4cc, it's just to show that it's been modified
             # after the first time, if the playback speed slider has been moved, it will use the value of the slider instead
-            if self.clists.playSong():
-               self.frame.master.playbackSpeedMenu.set(self.clists.song.playbackSpeed)
-            else:
+            self.clists.playSong(self.song)
+            if not self.clists.song.customSpeed:
                self.clists.song.song.set_rate(self.frame.master.playbackSpeedMenu.get())
             self.frame.master.disablePlaybackSpeedSlider(True)
 
@@ -75,7 +87,6 @@ class PlayerButtons:
                sleep(self.sleepDelay)
                self.songDuration = int(self.clists.song.song.get_length()/1000)
                self.timer.timerStart()
-
          # no song found
          except SongNotFound as e:
             print(e)
@@ -93,6 +104,7 @@ class PlayerButtons:
          # set the button as raised
          self.playButton.configure(relief=RAISED)
 
+   # now deprecated, but useful for bug testing
    def showSongs (self):
       text = self.text
       if not self.reserved:
@@ -107,10 +119,45 @@ class PlayerButtons:
       messagebox.showinfo(title, text)
 
    def insert (self, row):
-      self.listButton.grid(row=row,column=0,sticky=N+S, padx=2, pady=(5,0))
-      self.playButton.grid(row=row,column=1,sticky=NE+SW, padx=2, pady=(5,0))
-      self.resetButton.grid(row=row,column=2,sticky=N+S, padx=2, pady=(5,0))
-      self.volume.grid(row=row+1,column=0,columnspan=3,sticky=E+W, pady=(0,5))
+      self.volumeButton.grid(row=row,column=0,sticky=N+S,padx=2,pady=(5,0))
+      if self.dropdownButton is not None:
+         self.playButton.grid(row=row,column=1,sticky=NE+SW,padx=(2,0),pady=(5,0))
+         self.dropdownButton.grid(row=row,column=2,sticky=NS+W,pady=(5,0))
+      else:
+         self.playButton.grid(row=row,column=1,columnspan=2,sticky=NE+SW,padx=2,pady=(5,0))
+      self.resetButton.grid(row=row,column=3,sticky=N+S,padx=2,pady=(5,0))
+      self.volume.grid(row=row+1,column=0,columnspan=4,sticky=E+W,pady=(0,5))
+
+   def changeVA (self, *args):
+      if self.selected.get() == "Default":
+         self.playButton.config(text="Victory Anthem", command=self.playSong)
+         self.song = None
+      else:
+         self.playButton.config(text=self.selected.get())
+         self.song = self.getSpecial()
+   
+   def VAOnly (self, clists, home):
+      specialVAs = []
+      for clist in clists:
+         for condition in clist.conditions:
+            if condition.type() == 'special':
+               specialVAs.append(clist)
+      if not specialVAs:
+         return specialVAs
+      self.dropdownButton = Menubutton(self.frame, text="▼", relief=RAISED, bg=settings.colours["home" if home else "away"])
+      menu = Menu(self.dropdownButton, tearoff=False)
+      self.dropdownButton.configure(menu=menu)
+      self.selected = StringVar()
+      menu.add_radiobutton(label="Default", variable=self.selected, value="Default")
+      for anthem in specialVAs:
+         menu.add_radiobutton(label=os.path.basename(anthem.songname), variable=self.selected, value=os.path.basename(anthem.songname))
+      self.selected.trace('w', self.changeVA)
+      return specialVAs
+
+   def getSpecial (self):
+      for anthem in self.specialVAs:
+         if self.playButton['text'] == os.path.basename(anthem.songname):
+            return anthem
 
 class Timer:
    def __init__ (self, frame, songui, delay):
@@ -154,46 +201,49 @@ class TeamMenuLegacy (Frame):
       self.players = players
       self.home = home
       self.game = game
+      # list of player buttons
+      self.buttons = []
       # list of player names for use in buttons
       self.playerNames = [x for x in self.players.keys() if x not in reserved]
-      self.playerNames.sort()
       # tkinter frame containing menu
       # button for anthem
-      self.buildAnthemButtons()
+      self.buildAnthemButton()
       # buttons for victory anthems
       startRow = self.buildVictoryAnthemMenu() + 2
       # buttons for goalhorns
-      timerRow = self.buildGoalhornMenu(startRow)
+      self.buildGoalhornMenu(startRow)
       # victory song timer at the end
-      self.buildSongTimer(timerRow)
+      self.buildSongTimer()
 
-   def buildAnthemButtons (self):
-      self.anthemButtons = PlayerButtons(self, self.players["anthem"], self.home, self.game, "Anthem")
-      self.anthemButtons.insert(2)
+   def buildAnthemButton (self):
+      self.anthemButton = PlayerButtons(self, self.players["anthem"], self.home, self.game, "Anthem")
+      self.buttons.append(self.anthemButton)
+      self.anthemButton.insert(2)
 
    def buildVictoryAnthemMenu (self):
       if "victory" in self.players:
-         PlayerButtons(self, self.players["victory"], self.home, self.game, "Victory Anthem").insert(4)
+         self.victoryButton = PlayerButtons(self, self.players["victory"], self.home, self.game, "Victory Anthem")
+         self.buttons.append(self.victoryButton)
+         self.victoryButton.insert(4)
          return 4
       else:
          return 0
 
    def buildGoalhornMenu (self, startRow):
-      Label(self, text="Goalhorns").grid(row=startRow, column=0, columnspan=2)
-      PlayerButtons(self, self.players["goal"], self.home, self.game, "Standard Goalhorn").insert(startRow+1)
+      Label(self, text="Goalhorns").grid(row=startRow,columnspan=4)
+      self.goalButton = PlayerButtons(self, self.players["goal"], self.home, self.game, "Standard Goalhorn")
+      self.buttons.append(self.goalButton)
+      self.goalButton.insert(startRow+1)
       for i in range(len(self.playerNames)):
          name = self.playerNames[i]
-         PlayerButtons(self, self.players[name], self.home, self.game).insert(startRow+3+2*i)
-      # returns the row right after the goalhorns are built, for the song timer
-      return startRow+3+(2*len(self.playerNames))
+         self.playerButton = PlayerButtons(self, self.players[name], self.home, self.game)
+         self.buttons.append(self.playerButton)
+         self.playerButton.insert(startRow+3+2*i)
    
-   def buildSongTimer (self, timerRow):
-      self.timerFrame = Frame(self)
-      Label(self.timerFrame, text="Victory Song Duration - ").grid(row=0, column=0)
-      self.timeText = Label(self.timerFrame)
+   def buildSongTimer (self):
+      self.timeText = Label(self)
       self.updateSongTimer(0, 0)
-      self.timeText.grid(row=0, column=1)
-      self.timerFrame.grid(row=timerRow, column=0, columnspan=3)
+      self.timeText.grid(columnspan=4)
 
    # updates the UI timer
    def updateSongTimer (self, timer, duration):
@@ -201,9 +251,17 @@ class TeamMenuLegacy (Frame):
       timerSecs = timer%60
       durationMins = int(duration/60)
       durationSecs = duration%60
-      self.timeText.config(text = "{}:{} / {}:{}".format(timerMins, str(timerSecs).zfill(2), durationMins, str(durationSecs).zfill(2)))
+      self.timeText.config(text = "VA Duration - {}:{} / {}:{}".format(timerMins, str(timerSecs).zfill(2), durationMins, str(durationSecs).zfill(2)))
 
    def clear (self):
       for player in self.players.keys():
          for clist in self.players[player]:
             clist.disable()
+
+   def goNuclear(self):
+      for playerButton in self.buttons:
+         playerButton.clists.playSong(playerButton.song)
+
+   def stopNuclear(self):
+      for playerButton in self.buttons:
+         playerButton.clists.resetLastPlayed()

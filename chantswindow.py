@@ -45,6 +45,7 @@ class ChantsFrame(Frame):
       self.chantTimer = Scale(self, from_=20, to=60, orient=HORIZONTAL, command=self.chantsManager.adjustTimer, resolution=5, showvalue=1, length = 150)
       self.chantTimer.set(30)
       self.chantTimer.grid(columnspan=2)
+      self.enableTimer()
       # stop chant early button
       self.stopEarlyButton = Button(self, text="Stop Chant Early", command=self.chantsManager.endThread, bg="#f9fce0")
       self.stopEarlyButton.grid(columnspan=2)
@@ -110,16 +111,18 @@ class ChantsFrame(Frame):
 
 # creates and manages the chant buttons
 class ChantsButton:
-   def __init__ (self, frame, chantsManager, chant, text, home, random = False):
+   def __init__ (self, frame, chantsManager, chant, text, home, shuffle = False):
       # used to randomize the chant by having the argument take in the list of chants instead
-      if random and isinstance(chant, list):
-         self.chantList = chant
+      self.chantList = chant if random and isinstance(chant, list) else list()
       self.frame = frame
       self.chantsManager = chantsManager
       self.chant = chant
       self.text = text
       self.home = home
-      self.random = random
+      self.shuffle = shuffle
+      if self.shuffle:
+         self.shuffledList = self.chantList.copy()
+         random.shuffle(self.shuffledList)
 
       # how long a chant can be played for until it begins to fade out
       self.fadeOutTime = self.chantsManager.defaultTimer
@@ -128,19 +131,25 @@ class ChantsButton:
    def playChant (self):
       # if there is already a chant going on, ignore command
       if self.chantsManager.activeChant is not None:
-         print("Denied, chant currently playing")
+         print("Denied, chant currently playing.")
+      # if team has no chants, ignore command
+      elif self.shuffle and not self.chantList:
+         print("Team has no chants.")
       else:
          # randomly pick a chant from the list and set as this button's chant
-         if (self.random):
-            self.chant = random.choice(self.chantList)
+         if self.shuffle:
+            self.chant = self.shuffledList.pop(0)
+            if not self.shuffledList:
+               self.shuffledList = self.chantList.copy()
+               random.shuffle(self.shuffledList)
          # otherwise, set this chant as the active chant and begin playing
          self.playButton.configure(relief=SUNKEN)
          self.chantsManager.activeChant = self.chant
          self.chantEndCheck = threading.Thread(target=self.checkChantDone)
          self.chant.reloadSong()
          self.chant.play()
-         print("Chant now playing")
-         print("Chant Timer: {} seconds ".format(self.fadeOutTime))
+         print("Chant now playing.")
+         print("Chant Timer: {} seconds.".format(self.fadeOutTime))
          # while greying out the timer stuff and starting the chant end checker thread
          self.chantsManager.disableChantTimer(True, self.chantsManager.window.chantsFrame if self.chantsManager.window is not None else None)
          self.chantEndCheck.start()
@@ -151,7 +160,7 @@ class ChantsButton:
       while self.chantEndCheck is not None:
          # stops the thread early, before the song has finished playing
          if self.chantsManager.endThreadEarly:
-            print("Chant ended early")
+            print("Chant ended early.")
             # stops the song, resets the end thread bool, and enables the chant timer (bool reset and chant timer enable is for when new chants are loaded)
             self.chant.song.stop()
             self.chantsManager.endThreadEarly = False
@@ -168,7 +177,7 @@ class ChantsButton:
             self.chantEndCheck = None
          # checks if the user is even using the timer in the first place as well
          elif self.chantsManager.usingTimer and (time.time() - self.chantStart) > self.fadeOutTime:
-            print("Chant timed out, fade starting")
+            print("Chant timed out, fade starting.")
             self.chant.fade = True
             self.chant.fadeOut()
             self.chantDone()

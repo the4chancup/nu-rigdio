@@ -95,6 +95,7 @@ class ConditionEditor (Frame):
          "randomise" : lambda master,cond: EmptyConditionEditor(master,cond,RandomiseInstruction),
          "pause" : PauseInstructionEditor,
          "end" : EndInstructionEditor,
+         "warcry" : lambda master,cond: EmptyConditionEditor(master,cond,WarcryInstruction),
          "event" : EventInstructionEditor
       }
       return editors[ctype]

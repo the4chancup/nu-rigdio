@@ -295,6 +295,21 @@ class MostGoalsCondition (Condition):
    def type (self):
       return "mostgoals"
 
+class SpecialCondition (Condition):
+   desc = """Special."""
+
+   def __init__(self, tokens, **kwargs):
+      super().__init__(**kwargs)
+
+   def check (self, gamestate):
+      return False
+
+   def type (self):
+      return "special"
+
+   def tokens (self):
+      return []
+
 class PromptCondition (Condition):
    def __init__ (self, dtype, **kwargs):
       super().__init__(**kwargs)
@@ -448,9 +463,15 @@ class Instruction:
    def isInstruction (self):
       return True
 
+   def append (self, player):
+      """
+         Registers this instruction to the start, end, or pause instruction list.
+      """
+      raise NotImplementedError("Instruction subclass must override append().")
+
    def prep (self, player):
       """
-         Prepares this instruction for later use (registering it to the start, end, or pause instruction list).
+         Prepares this instruction for later use.
       """
       raise NotImplementedError("Instruction subclass must override prep().")
 
@@ -497,8 +518,10 @@ class StartInstruction (Instruction):
       self.rawTime = timestring
       self.startTime = int(1000*timeToSeconds(timestring))
 
-   def prep (self, player):
+   def append (self, player):
       player.instructionsStart.append(self)
+
+   def prep (self, player):
       player.startTime = self.startTime
 
    def run (self, player):
@@ -518,9 +541,11 @@ class SpeedInstruction (Instruction):
       self.rawSpeed = speedstring
       self.playbackSpeed = float(speedstring)
 
-   def prep (self, player):
+   def append (self, player):
       player.instructionsStart.append(self)
-      player.playbackSpeed = self.playbackSpeed
+
+   def prep (self, player):
+      player.customSpeed = True
 
    def run (self, player):
       player.song.set_rate(self.playbackSpeed)
@@ -535,14 +560,16 @@ class RandomiseInstruction (Instruction):
    desc = """If all songs for a single player have this condition, Rigdio will randomly pick and play a song from the list everytime instead of following priority."""
 
    def __init__ (self, tokens, **kwargs):
-      None
+      pass
+
+   def append (self, player):
+      player.instructionsStart.append(self)
 
    def prep (self, player):
-      player.instructionsStart.append(self)
       player.randomise = True
 
    def run (self, player):
-      player.randomise = True
+      pass
 
    def type (self):
       return "randomise"
@@ -563,8 +590,10 @@ class PauseInstruction (Instruction):
             self.every = int(tokens[2])
       self.command = tokens[0]
 
-   def prep (self, player):
+   def append (self, player):
       player.instructionsPause.append(self)
+
+   def prep (self, player):
       self.played = 0
 
    def run (self, player):
@@ -590,22 +619,47 @@ class EndInstruction (Instruction):
          raise ValueError("Unrecognised end type (allowed values: {}).".format(", ".join(EndInstruction.types)))
       self.command = tokens[0]
 
-   def prep (self, player):
+   def append (self, player):
       player.instructionsEnd.append(self)
+
+   def prep (self, player):
       if self.command != "loop":
          player.repeat = False
 
-   def run (self, player):
+   def run (self, playerManager):
       if self.command == "stop":
-         player.reloadSong()
-      elif self.command == "next":
-         raise PlayNextSong
+         playerManager.song.reloadSong()
 
    def type (self):
       return "end"
 
    def tokens(self):
       return [self.command]
+
+class WarcryInstruction (Instruction):
+   desc = """Play next song that doesn't have this instruction in priority list once this ends, meant to be short like a war cry."""
+
+   def __init__ (self, tokens, **kwargs):
+      pass
+
+   def append (self, player):
+      player.instructionsEnd.append(self)
+
+   def prep (self, player):
+      # if for some reason the warcry is set to loop, turn it off
+      player.repeat = False
+      player.warcry = True
+
+   def run (self, playerManager):
+      # runs when the warcry ends, to let PlayerManager know to play a non-warcry song now
+      playerManager.warcry = False
+      playerManager.playSong()
+
+   def type (self):
+      return "warcry"
+
+   def tokens(self):
+      return []
 
 class EventInstruction (Instruction):
    desc = """DEPRECATED: PLEASE USE EVENT: IN YOUR .YML"""
@@ -615,6 +669,9 @@ class EventInstruction (Instruction):
       if tokens[0] not in EventInstruction.types:
          raise ValueError("Unrecognised event type (allowed values: {}).".format(", ".join(EventInstruction.types)))
       self.etype = tokens[0]
+
+   def append (self, player):
+      player.instructionsStart.append(self)
 
    def prep (self, player):
       player.event = self.etype
@@ -642,11 +699,9 @@ conditions = {
    "once" : OnceCondition,
    "mostgoals" : MostGoalsCondition,
    "every" : EveryCondition,
-   # prompt
-   #"time" : TimeCondition, # not being used right now
-   # magic
    "comeback" : ComebackCondition,
    "first" : FirstCondition,
+   "special" : SpecialCondition,
    # meta
    "not" : NotCondition,
    #"or" : OrCondition,
@@ -658,6 +713,7 @@ conditions = {
    "randomise" : RandomiseInstruction,
    "pause" : PauseInstruction,
    "end" : EndInstruction,
+   "warcry" : WarcryInstruction,
    "event" : EventInstruction # deprecated, for .4ccm use
 }
 
@@ -666,7 +722,8 @@ instructions = {
    "speed" : SpeedInstruction,
    "randomise" : RandomiseInstruction,
    "pause" : PauseInstruction,
-   "end" : EndInstruction
+   "end" : EndInstruction,
+   "warcry" : WarcryInstruction
 }
 
 def processTokens (tokenStr):

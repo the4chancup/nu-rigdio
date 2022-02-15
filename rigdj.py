@@ -1,5 +1,3 @@
-import inspect
-
 from version import rigdj_version as version
 from logger import startLog
 if __name__ == '__main__':
@@ -12,7 +10,6 @@ from tkinter import *
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as messagebox
 from tkinter.simpledialog import Dialog
-import tkinter.font
 
 from condition import *
 from conditioneditor import ConditionDialog
@@ -20,7 +17,7 @@ from conditioneditor import ConditionDialog
 from rigdj_util import *
 from rigparse import parse, reserved
 
-specialNames = set(["Goalhorn", "Anthem", "Victory Anthem"])
+specialNames = set(["Goalhorn", "Anthem", "Victory Anthem", "chant"])
 
 class ConditionButton (Button):
    """
@@ -62,13 +59,17 @@ class ConditionButton (Button):
                self.songrow.append(temp)
             # store temp as this button's new condition, in case update fails for some reason
             self.cond = temp
+         # check and modify status of randomise checkbox once conditions are changed
+         self.master.setRandomise()
          # we've added or changed a condition, so update row and trigger callbacks
          self.songrow.update(True)
 
 class SongRow:
-   def __init__ (self, songed, row, clist):
-      # self.master is a SongEditor object; referenced for callbacks and drawing
-      self.master = songed
+   def __init__ (self, master, songed, row, clist):
+      # self.master for frame it's attached to; different from songed when multiple song rows are used
+      self.master = master
+      # self.songed is the SongEditor object; referenced for callbacks and drawing
+      self.songed = songed
       # condition list for this row
       self.clist = clist
       # row in which to draw this row; equal to its index in self.master's clists plus 1
@@ -94,11 +95,11 @@ class SongRow:
       # extra spacing because all objects get the same grid() args
       output.append(Label(self.master,text=" "))
       # down button
-      output.append(Button(self.master,text="▼", command=lambda: self.master.moveSongDown(self.row-1)))
+      output.append(Button(self.master,text="▼", command=lambda: self.songed.moveSongDown(self.row-1)))
       # shows priority
       output.append(Label(self.master,textvariable=self.strRow))
       # up button
-      output.append(Button(self.master,text="▲", command=lambda: self.master.moveSongUp(self.row-1)))
+      output.append(Button(self.master,text="▲", command=lambda: self.songed.moveSongUp(self.row-1)))
       # extra spacing because all objects get the same grid() args
       output.append(Label(self.master,text=" "))
       # open file for the song name
@@ -125,7 +126,7 @@ class SongRow:
          Deletes this row from master.
       """
       self.clear()
-      self.master.pop(self.row-1)
+      self.songed.pop(self.row-1)
 
    def updateName (self, *args):
       """
@@ -134,7 +135,7 @@ class SongRow:
          Invokes callbacks for changes.
       """
       self.clist.songname = self.songNameEntry.get()
-      self.master.callbacks()
+      self.songed.callbacks()
 
    def update (self, callback=True):
       """
@@ -150,19 +151,35 @@ class SongRow:
       # disable arrows if the row is inappropriate
       if self.row == 1:
          self.baseElements[4]['state'] = 'disabled'
-      if self.row == self.master.count():
+      if self.row == self.songed.count():
          self.baseElements[2]['state'] = 'disabled'
 
       # construct condition buttons
       self.conditionButtons = [ConditionButton(self,index) for index in range(len(self.clist))]
-      self.conditionButtons.append(ConditionButton(self,len(self)))
+      # if new conditions are not allowed, disable the 'Add Condition' button
+      if self.checkNewConditions():
+         self.conditionButtons.append(ConditionButton(self,len(self)))
       # construct complete list of elements
       self.elements = self.baseElements + self.conditionButtons
       # draw elements
       for index in range(len(self.elements)):
          self.elements[index].grid(row=self.row,column=index,sticky=N+E+W+S,padx=2,pady=1)
       if callback:
-         self.master.callbacks()
+         self.songed.callbacks()
+
+   def checkNewConditions (self):
+      # if this is the chants player, prevent new conditions from being added
+      if self.master.master.current == 'chant':
+         return False
+
+      # if the song has the randomise instruction or special condition, prevent new conditions from being added
+      for instruction in self.clist.instructions:
+         if instruction.type() == 'randomise':
+            return False
+      for condition in self.clist.conditions:
+         if condition.type() == 'special':
+            return False
+      return True
 
    def openFile (self):
       # get a file
@@ -222,6 +239,8 @@ class SongEditor (Frame):
       self.master = master
       # used to check if button has been randomised
       self.buttonRandomised = False
+      # prepare widgets needed for the special VA section
+      self.loadSpecialVA()
       # load clists into songrows as needed
       self.load(clists)
       # necessary callbacks: update previewer and update own information, whenever stuff changes
@@ -235,46 +254,59 @@ class SongEditor (Frame):
       # clear previous information
       for child in self.winfo_children():
          child.grid_forget()
+      # if the special VA frame is visible, hide it first
+      if self.specialVisible:
+         for child in self.specialFrame.winfo_children():
+            child.grid_forget()
+         self.specialFrame.grid_forget()
+         self.specialVisible = False
       # reconstruct
       self.songrows = []
-      # if there are no horns, set the value to false
-      if len(clists) == 0:
-            self.buttonRandomised = False
-      # checks if the selected player already has its horns randomised
-      for index in range(len(clists)):
-         self.checkOkay = False
-         # loops through the list of conditions and instructions, breaks once a randomise instruction is found
-         for instruction in clists[index]:
-            if (RandomiseInstruction == type(instruction)):
-               self.checkOkay = True
-               break
-         # if no randomise instruction is found, set the value to false and break the loop
-         # otherwise, check condition list of the next horn
-         if (not self.checkOkay):
-            self.buttonRandomised = False
-            break
-         else:
-            self.buttonRandomised = True
-      # if button is randomised, check the randomise button checkbox and set the variable assigned to it to 1
-      if self.buttonRandomised:
-         self.master.randomVar.set(1)
-         self.master.randomiseButton.select()
-      # otherwise, uncheck it and set the variable to 0
+      # if current player is the victory anthem, find the special victory anthems
+      if self.master.current == "Victory Anthem":
+         for index in range(len(clists)):
+            special = False
+            for instruction in clists[index]:
+               if instruction.type() == 'special':
+                  special = True
+                  break
+            if special:
+               # turn special VAs into song rows and bind them to the special VA section
+               self.songrows.append(SongRow(self.specialFrame,self,index+1,clists[index]))
+            else:
+               # bind the normal VAs to the regular SongEditor section
+               self.songrows.append(SongRow(self,self,index+1,clists[index]))
+      # else, just turn clists into song rows like usual
       else:
-         self.master.randomVar.set(0)
-         self.master.randomiseButton.deselect()
-      # turn clists into song rows
-      for index in range(len(clists)):
-         self.songrows.append(SongRow(self,index+1,clists[index]))
+         for index in range(len(clists)):
+            self.songrows.append(SongRow(self,self,index+1,clists[index]))
       # update, but don't invoke callbacks, since loading a player's entries doesn't change the .4ccm
       self.update(True, False)
+
+   def loadSpecialVA (self):
+      """
+         Create the widgets needed for the special VA section.
+      """
+      self.specialFrame = Frame(self.master)
+      self.specialVisible = False
+      self.newSongButtonSpecial = Button(self.specialFrame, text="Add Song",command=self.addSongSpecial)
+      self.specialLabel = Label(self.specialFrame,text="Special Victory Anthems")
 
    def addSong (self):
       """
          Add a new empty song row.
       """
-      self.songrows.append(SongRow(self,len(self.songrows)+1,ConditionList()))
+      self.songrows.append(SongRow(self,self,len(self.songrows)+1,ConditionList()))
       # update; only need to add headings if this was the first row
+      self.update(len(self.songrows)==1)
+
+   def addSongSpecial (self):
+      """
+         Add a new empty song row to the special VA section.
+      """
+      song = SongRow(self.specialFrame,self,len(self.songrows)+1,ConditionList())
+      song.append(SpecialCondition(None))
+      self.songrows.append(song)
       self.update(len(self.songrows)==1)
 
    def callbacks (self):
@@ -285,6 +317,8 @@ class SongEditor (Frame):
       """
          Updates every SongRow object and constructs surrounding elements as needed.
       """
+      # check and modify status of randomise checkbox
+      self.setRandomise()
       # update every song row
       for index in range(len(self.songrows)):
          songrow = self.songrows[index]
@@ -292,6 +326,7 @@ class SongEditor (Frame):
          # don't invoke callbacks on a per-row basis, they'll be called at the end if needed
          songrow.update(callback=False)
       # check if we should add headings
+      # special VA uses songrows list too, it will load even if special VAs are made first
       if len(self.songrows) > 0 and headings:
          Label(self,text="Priority").grid(row=0,column=2,columnspan=3,sticky=E+W)
          Label(self,text="Song Location").grid(row=0,column=6,columnspan=2,sticky=E+W)
@@ -299,9 +334,66 @@ class SongEditor (Frame):
       # move the new song button
       self.newSongButton.grid_forget()
       self.newSongButton.grid(row=len(self.songrows)+1,column=0,columnspan=3,sticky=E+W, padx=2, pady=2)
+      # if current player is the victory anthem, load special VA section
+      if self.master.current == "Victory Anthem":
+         self.updateSpecial()
       # invoke callbacks if needed
       if callback:
          self.callbacks()
+
+   # updates songeditor to include special VA section
+   def updateSpecial (self):
+      self.specialFrame.grid(row=len(self.songrows)+3,column=1,rowspan=3,sticky=NE+SW,padx=5,pady=5)
+      self.specialVisible = True
+      # load special VA section title
+      self.specialLabel.grid_forget()
+      self.specialLabel.grid(row=0,column=0,columnspan=999,sticky=E+W, padx=2, pady=2)
+      # use the same song row list as the regular section, they're 
+      for index in range(len(self.songrows)):
+         songrow = self.songrows[index]
+         songrow.row = index+1
+         songrow.update(callback=False)
+      
+      # move the special VA new song button (using songrows guarantees it stays at the bottom of the frame)
+      self.newSongButtonSpecial.grid_forget()
+      self.newSongButtonSpecial.grid(row=len(self.songrows)+1,column=0,columnspan=3,sticky=E+W, padx=2, pady=2)
+
+   def setRandomise (self):
+      """
+         Checks whether the currently selected player has their songs randomised or not, and sets the randomise checkbox's status accordingly
+      """
+      clists = self.clists()
+      # if there are no horns, set the value to false
+      if len(clists) == 0:
+            self.buttonRandomised = False
+      # checks if the selected player already has its horns randomised
+      i = 0
+      while i < len(clists):
+         self.checkOkay = False
+         # loops through the list of conditions and instructions, breaks once a randomise instruction is found
+         for cond in clists[i]:
+            # do not count songs with warcry/special instructions on them
+            if cond.type() in ['randomise', 'warcry', 'special']:
+               self.checkOkay = True
+               break
+         # if no randomise instruction is found, set the value to false and break the loop
+         # otherwise, check condition list of the next horn
+         if not self.checkOkay:
+            self.buttonRandomised = False
+            break
+         else:
+            self.buttonRandomised = True
+            i += 1
+      # if songs are randomised, check the randomise button checkbox and set the variable assigned to it to 1
+      if self.buttonRandomised:
+         self.master.randomVar.set(1)
+         self.master.randomiseButton.select()
+         return True
+      # otherwise, uncheck it and set the variable to 0
+      else:
+         self.master.randomVar.set(0)
+         self.master.randomiseButton.deselect()
+         return False
 
    def moveSongUp (self, index):
       """
@@ -354,13 +446,15 @@ class PlayerSelectFrame (Frame):
       self.songs = {
          "Anthem" : [],
          "Victory Anthem" : [],
-         "Goalhorn" : []
+         "Goalhorn" : [],
+         "chant" : []
       }
       # create list selector with default options
       self.playerMenu = ScrollingListbox(self,exportselection=False)
       self.playerMenu.insert(END,"Anthem")
       self.playerMenu.insert(END,"Victory Anthem")
       self.playerMenu.insert(END,"Goalhorn")
+      self.playerMenu.insert(END,"chant")
       self.playerMenu.grid(row=2,column=0,padx=5,pady=5,sticky=N+S)
       self.current = None
       self.editor = editor
@@ -398,8 +492,9 @@ class PlayerSelectFrame (Frame):
          self.deleteButton["state"] = 'normal'
       self.current = None
       clists = self.songs[pname]
-      self.songEditor.load(clists)
       self.current = pname
+      self.songEditor.load(clists)
+      self.songEditor.update()
 
    def updateCurrent (self):
       """
@@ -412,7 +507,7 @@ class PlayerSelectFrame (Frame):
       """
          Sets the list box contents to the reserved names plus the contents of players.
       """
-      self.playerMenu.delete(3,END)
+      self.playerMenu.delete(4,END)
       players.sort()
       for player in players:
          self.playerMenu.insert(END,player)
@@ -427,7 +522,8 @@ class PlayerSelectFrame (Frame):
       self.songs = {
          "Anthem" : [],
          "Victory Anthem" : [],
-         "Goalhorn" : []
+         "Goalhorn" : [],
+         "chant" : []
       }
       for player in self:
          if player in songs:
@@ -435,7 +531,8 @@ class PlayerSelectFrame (Frame):
          elif player not in specialNames:
             self.songs.delete(player)
       self.current = None
-      self.loadSongEditor("Anthem")
+      # when a new 4ccm is loaded/created, default back to the anthem(s)
+      self.setSelection(self.playerMenu.get(0,END).index("Anthem"))
       self.current = "Anthem"
 
    def addPlayer (self):
@@ -446,7 +543,7 @@ class PlayerSelectFrame (Frame):
       if name == "":
          messagebox.showwarning("Error","Player name cannot be empty.")
          return
-      i = 3
+      i = 4
       while i < self.playerMenu.size() and name > self.playerMenu.get(i):
          i += 1
       if self.playerMenu.get(i) == name:
@@ -458,7 +555,7 @@ class PlayerSelectFrame (Frame):
 
    def setSelection (self,index):
       """
-         Setls the selection to the player at the given index.
+         Sets the selection to the player at the given index.
       """
       self.playerMenu.selection_clear(first=0,last=END)
       self.playerMenu.selection_set(first=index)
@@ -499,17 +596,23 @@ class PlayerSelectFrame (Frame):
    def randomiseHorns (self):
       """
          When checked on, sets all horns of currently selected player to have only the "randomise" condition (as well as remove the 'Add Condition' button),
-         which has Rigdio randomly select a horn from the list instead of following priority.
+         which has Rigdio randomly select a horn from the list instead of following priority. Horns which have the warcry or special instruction do not have the randomise instruction applied to them.
          When checked off, resets all horns to have no condition.
       """
       if self.randomVar.get() == 1:
          for row in self.songEditor.songrows:
-            row.append(RandomiseInstruction(None))
+            noAppend = False
+            for cond in row.clist:
+               if cond.type() in ['randomise', 'warcry', 'special']:
+                  noAppend = True
+                  break
+            if not noAppend:
+               row.append(RandomiseInstruction(None))
       else:
          for row in self.songEditor.songrows:
             x = 0
             while x < len(row.clist):
-               if str(row.clist[x]) == "randomise":
+               if row.clist[x].type() == 'randomise':
                   row.pop(x)
                   continue
                else:
@@ -645,10 +748,17 @@ class Editor (Frame):
       print("# team identifier", file=outfile)
       print("name;{}".format(self.teamEntry.get()), file=outfile)
       print("",file=outfile)
-      # if no victory anthems provided, copy normal anthem
       print("# reserved names", file=outfile)
-      if outfile != self.previewer.buffer and ("victory" not in players or len(players["victory"]) == 0):
-         players["victory"] = players["anthem"]
+      # count number of special VAs and see if it matches VA list length (all VAs are special)
+      limit, count = len(players["victory"]), 0
+      for player in players["victory"]:
+         for instruction in player.instructions:
+            if instruction.type() == 'special':
+               count += 1
+               break
+      # if no regular victory anthems provided, copy normal anthem
+      if outfile != self.previewer.buffer and (("victory" not in players and count >= limit) or (len(players["victory"]) == 0 and count >= limit)):
+         players["victory"] += players["anthem"]
       for player in self.playerMenu:
          player = outName(player)
          if player not in reserved and flag == False:
