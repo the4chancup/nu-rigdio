@@ -216,11 +216,13 @@ class ConditionPlayer (ConditionList):
       super().disable()
 
 class PlayerManager:
-   def __init__ (self, clists, home, game):
+   def __init__ (self, clists, home, game, master):
       # song information
       self.clists = clists
       self.home = home
       self.game = game
+      # playerbutton information
+      self.master = master
       # derived information
       self.song = None
       self.lastSong = None
@@ -320,6 +322,9 @@ class PlayerManager:
          self.endChecker.start()
       # remove any data specific to this goal
       self.game.clearButtonFlags()
+      # if the song is the victory anthem and not a warcry, start victory song duration timer
+      if self.clists[0].pname == "victory" and not self.song.warcry:
+         self.master.timer.retrieveSongInfo()
       return self.firstTime
 
    def pauseSong (self):

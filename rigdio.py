@@ -224,7 +224,7 @@ class Rigdio (Frame):
             self.away.clear()
          self.away = TeamMenuLegacy(self, tname, tmusic, False, self.game)
          if self.home is not None:
-            self.away.anthemButton.awayButtonHook = self.home.anthemButton
+            self.home.anthemButton.awayButtonHook = self.away.anthemButton
          self.away.grid(row = 1, column = 2, rowspan=2, sticky=N)
          if self.chantsManager is not None:
             if "chant" in tmusic and tmusic["chant"] is not None:

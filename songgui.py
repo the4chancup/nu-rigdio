@@ -10,7 +10,7 @@ from time import sleep
 class PlayerButtons:
    def __init__ (self, frame, clists, home, game, text = None):
       # song information
-      self.clists = PlayerManager(clists,home,game)
+      self.clists = PlayerManager(clists,home,game,self)
       self.game = game
       # derived information
       self.song = None
@@ -25,9 +25,7 @@ class PlayerButtons:
       # timer stuff
       if self.victoryAnthem:
          # vlc takes some time to retrieve song duration, so a sleep delay is needed
-         self.sleepDelay = 1
-         self.timer = Timer(self.frame, self, self.sleepDelay)
-         self.songDuration = int()
+         self.timer = Timer(self, self.frame, 1)
       # check if text is none (most players)
       if self.text is None:
          self.text = "\n".join([x.lstrip() for x in self.pname.split(",")])
@@ -81,12 +79,6 @@ class PlayerButtons:
             if not self.clists.song.customSpeed:
                self.clists.song.song.set_rate(self.frame.master.playbackSpeedMenu.get())
             self.frame.master.disablePlaybackSpeedSlider(True)
-
-            # if the song is the victory anthem, have a sleep delay to retrieve song duration before starting up the timer
-            if self.victoryAnthem:
-               sleep(self.sleepDelay)
-               self.songDuration = int(self.clists.song.song.get_length()/1000)
-               self.timer.timerStart()
          # no song found
          except SongNotFound as e:
             print(e)
@@ -160,17 +152,24 @@ class PlayerButtons:
             return anthem
 
 class Timer:
-   def __init__ (self, frame, songui, delay):
+   def __init__ (self, songui, frame, delay):
       self.frame = frame
       self.songui = songui
       self.delay = delay
       self.timer = int()
+      self.songDuration = int()
       self.stopCounting = False
+
+   # have a sleep delay to retrieve song duration before starting up the timer (necessary due to python-vlc being shit)
+   def retrieveSongInfo (self):
+      sleep(self.delay)
+      self.songDuration = int(self.songui.clists.song.song.get_length()/1000)
+      self.timerStart()
 
    def timerStart (self):
       # increases the timer by the sleep delay (that occurs when starting the VA) before starting the counting loop
       self.timer += self.delay
-      self.frame.updateSongTimer(self.timer, self.songui.songDuration)
+      self.frame.updateSongTimer(self.timer, self.songDuration)
       self.frame.after(1000, self.timerCountSecond)
 
    # used to stop the timer loop
@@ -184,7 +183,7 @@ class Timer:
          self.stopCounting = False
       else:
          self.timer += 1
-         self.frame.updateSongTimer(self.timer, self.songui.songDuration)
+         self.frame.updateSongTimer(self.timer, self.songDuration)
          self.frame.after(1000, self.timerCountSecond)
 
    # resets the internal and UI timers to 0
