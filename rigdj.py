@@ -757,10 +757,13 @@ class Editor (Frame):
                count += 1
                break
       # if no regular victory anthems provided, copy normal anthem
-      if outfile != self.previewer.buffer and (("victory" not in players and count >= limit) or (len(players["victory"]) == 0 and count >= limit)):
+      if outfile != self.previewer.buffer and count >= limit and (len(players["victory"]) == 0 or "victory" not in players):
          players["victory"] += players["anthem"]
       for player in self.playerMenu:
          player = outName(player)
+         # if no chants provided, skip writing songs for chant player
+         if player == "chant" and outfile != self.previewer.buffer and (len(players["chant"]) == 0 or "chant" not in players):
+            continue
          if player not in reserved and flag == False:
             print("",file=outfile)
             print("# regular players", file=outfile)
