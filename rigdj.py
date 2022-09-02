@@ -44,6 +44,9 @@ class ConditionButton (Button):
       super().__init__(self.songrow.master, command=self.edit, text=txt, **kwargs)
 
    def edit (self):
+      # disables any possible editing of special conditions
+      if type(self.cond) is SpecialCondition:
+         return
       # get a condition from a ConditionDialog
       temp = ConditionDialog(self.master,self.cond,self.cond==None).condition
       # if None, was a NewCondition and Cancel was pressed

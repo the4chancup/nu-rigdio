@@ -296,7 +296,8 @@ class MostGoalsCondition (Condition):
       return "mostgoals"
 
 class SpecialCondition (Condition):
-   desc = """Special."""
+   desc = """Used to allow easy access to special victory anthems on Rigdio.
+(DO NOT SET THIS CONDITION UNDER ANYTHING ELSE OTHER THAN VICTORY ANTHEM, IT WILL BREAK YOUR .4CCM)"""
 
    def __init__(self, tokens, **kwargs):
       super().__init__(**kwargs)
